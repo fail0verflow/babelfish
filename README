@@ -1,0 +1,96 @@
+This is babelfish, a just-in-time self-propagting IOS patcher for the Nintendo Wii.
+
+Background:
+
+The Wii poses a peculiar architectural challenge when it comes to
+modifying firmware.  Instead of having one firmware binary to patch,
+the Wii keeps 20+ slightly incompatible versions of IOS around in
+NAND; it reloads the firmware entirely (often to a different version)
+when a new title is launched.  This makes it difficult to permanently
+modify the behavior (e.g. preventing a bootloader update) because
+firmware is frequently reloaded.
+
+The most naive approach to solving this is to patch every single
+version of the firmware in NAND; this is done by e.g. CIOSCORP.  This
+approach is unacceptable for two reasons:
+
+1) Any failure in patching could either leave a system unbootable (and
+bricked), or could fail to apply the desired protection
+
+2) Any update will wipe out some of the patched firmwares.  It's
+possible to disable firmware updates by various methods, but it's
+still ugly.
+
+A better solution was necessary, so I started working on a piece of
+code that could stay resident between IOS reloads -- it would have to
+transfer itself along with each new version of IOS.  "IOS Virus" was
+the first term that came to mind, but that has a negative connotation;
+I chose "Babelfish" to express the benevolent intent of this software. (See
+http://en.wikipedia.org/wiki/Babel_fish_(The_Hitchhiker%27s_Guide_to_the_Galaxy))
+
+Theory of operation:
+In order for this to work, we need two things:
+1) An ability to consistently patch any IOS
+2) An ability to patch any IOS when it gets loaded
+
+To simplify this task, a few assumptions have been made:
+
+1) All versions of IOS have an ELF loader in the beginning of the
+   image, which we may safely replace with our own loader
+
+2) All versions of IOS have a predictable syscall structure, which
+   allows us to hook the right events
+
+3) There is one safe, unused area of memory that we can "hide" a copy
+   of ourself without getting overwritten when IOS is reloaded
+
+4) We can make patches that are generic enough that they work on all
+   versions of IOS.
+
+As long as these are all true, then we can implement our code as a
+replacement ELF loader; our loader also has the capability to patch
+binaries as it loads them.  One of the patches it does is ... to hook
+something* in the IOS reload path to replace the new IOS's loader with
+a stashed copy of ourself before jumping to it.
+
+The other patches it makes are just there to make life more
+interesting; the most useful one is a patch to SVC call #4 to redirect
+the normally /dev/nulled IOS debug output to USBGecko.
+
+Usage:
+
+After compiling Babelfish, you will end up with a babelfish.bin, which
+is a replacement ELF loader that can be used with any version of IOS,
+including boot2.  One easy way to use it is to take boot2v4, replace
+the ELF loader with babelfish and use BootMii to load it as
+armboot.bin.  After that, if all works well, it will stay resident in
+memory until the system is powered down.
+
+Known limitations and bugs:
+
+1) This code is somewhat old, and was written before we found
+   HW_AHBPROT; some of this may no longer be necessary.
+
+2) There are several fragile points highlighted in the code, such as
+   the maximum code size / stack size, reload_ios/xchange_osvers,
+   syscall numbering, etc.
+
+3) PPC patching "almost" works.
+
+4) It won't survive a reboot to GameCube mode or through BootMii.
+
+5) You probably have to have a USBGecko to get any use out of this.
+
+6) There are several different patching strategies employed; it might
+   be nice to clean up and/or refactor that code.
+
+Safety notes:
+
+Despite the Rube-Goldberg patching mechanism involved here, Babelfish
+should pratically always be safer for your Wii than patching firmware
+in flash.  The only dangerous scenario I can think of is that any
+patches you make to the FFS driver may cause NAND to be corrupted in a
+way that "vanilla" IOS doesn't undestand, which will cause IOS to
+break if Babelfish fails to load.  Just be extra careful when touching
+any code that deals with NAND unless you have BootMii/boot2 installed
+with a recent NAND flash backup.bin.
